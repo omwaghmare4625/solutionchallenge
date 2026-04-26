@@ -1,0 +1,13 @@
+node_modules
+.next
+mobile/node_modules
+mobile/.expo
+.git
+.gitignore
+*.md
+.env*
+!.env.example
+*.log
+.DS_Store
+Dockerfile
+docker-compose.yml

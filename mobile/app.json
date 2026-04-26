@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "Field Worker App",
+    "slug": "field-worker-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "assetBundlePatterns": [
+      "**/*"
+    ]
+  }
+}
