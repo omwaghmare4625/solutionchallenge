@@ -1,0 +1,11 @@
+# Mobile Expo local state
+frontend/mobile/.expo/
+
+# Node dependencies
+**/node_modules/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
