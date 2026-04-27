@@ -3,8 +3,7 @@ const path = require('path');
 const db = require('../../shared/db');
 const storage = require('../../shared/storage');
 const events = require('../../shared/events');
-const ocr = require('./ocr.service');
-const mapper = require('./ocr.mapper');
+const { processDocumentImage } = require('./pipeline.service');
 
 const isMissing = (value) => value === undefined || value === null || String(value).trim() === '';
 
@@ -176,21 +175,39 @@ async function submitPhoto(req, res) {
         .json(buildValidationError('Authenticated user context is incomplete', ['ngo_id', 'user_id']));
     }
 
-    const generatedName = createPhotoFileName(req.file.originalname || '');
-    const ref = await storage.save(req.file.buffer, generatedName);
-
-    let text = '';
+    let pipeline;
     try {
-      text = await ocr.extractText(req.file.buffer);
+      pipeline = await processDocumentImage({
+        buffer: req.file.buffer,
+        mimetype: req.file.mimetype,
+        originalname: req.file.originalname,
+      });
     } catch (error) {
+      if (error.code === 'image_quality_rejected') {
+        return res.status(error.statusCode || 422).json({
+          error: error.code,
+          message: 'The uploaded image is too poor for reliable OCR',
+          details: error.details,
+        });
+      }
+
       return res.status(422).json({
         error: 'ocr_failed',
         message: 'Unable to extract text from photo',
       });
     }
 
-    const extracted = mapper.mapText(text);
-    const fields = ['category_key', 'severity', 'lat', 'lng'];
+    const generatedName = createPhotoFileName(req.file.originalname || '');
+    const originalRef = await storage.save(req.file.buffer, generatedName);
+    const processedVariantName = pipeline.processedVariant.name === 'original'
+      ? null
+      : `processed_${generatedName.replace(/\.[^.]+$/, '')}.png`;
+    const processedRef = processedVariantName
+      ? await storage.save(pipeline.processedVariant.buffer, processedVariantName)
+      : null;
+
+    const extracted = pipeline.normalized;
+    const fields = ['category_key', 'severity', 'population_affected', 'time_sensitivity_hours', 'description', 'lat', 'lng'];
     const extractedCount = fields.filter(
       (field) => extracted[field] !== null && extracted[field] !== undefined
     ).length;
@@ -201,9 +218,13 @@ async function submitPhoto(req, res) {
 
     const categoryKey = extracted.category_key || 'unknown';
     const severity = Number.isInteger(extracted.severity) ? extracted.severity : 3;
+    const populationAffected = Number.isInteger(extracted.population_affected) ? extracted.population_affected : 0;
+    const timeSensitivityHours = Number.isFinite(extracted.time_sensitivity_hours) ? extracted.time_sensitivity_hours : 48;
+    const description = extracted.description || pipeline.ocr.text || null;
     const lat = parseNumber(extracted.lat);
     const lng = parseNumber(extracted.lng);
     const hasCoordinates = lat !== null && lng !== null;
+    const photoRefs = processedRef ? [originalRef, processedRef] : [originalRef];
 
     const insertQuery = `
       INSERT INTO reports (
@@ -212,7 +233,14 @@ async function submitPhoto(req, res) {
         source_channel,
         category_key,
         severity,
+        population_affected,
+        time_sensitivity_hours,
+        description,
         ocr_confidence,
+        ocr_raw_text,
+        ocr_document_type,
+        ocr_field_confidence,
+        ocr_pipeline,
         photo_refs,
         status,
         location
@@ -226,13 +254,20 @@ async function submitPhoto(req, res) {
         $6,
         $7,
         $8,
+        $9,
+        $10,
+        $11,
+        $12,
+        $13,
+        $14,
+        $15,
         CASE
-          WHEN $9::double precision IS NOT NULL AND $10::double precision IS NOT NULL
-          THEN ST_SetSRID(ST_MakePoint($10, $9), 4326)
+          WHEN $16::double precision IS NOT NULL AND $17::double precision IS NOT NULL
+          THEN ST_SetSRID(ST_MakePoint($17, $16), 4326)
           ELSE NULL
         END
       )
-      RETURNING report_id;
+      RETURNING id;
     `;
 
     const insertValues = [
@@ -241,15 +276,33 @@ async function submitPhoto(req, res) {
       'ocr',
       categoryKey,
       severity,
+      populationAffected,
+      timeSensitivityHours,
+      description,
       ocrConfidence,
-      [ref],
+      pipeline.ocr.text,
+      pipeline.document.type,
+      pipeline.confidence.fields,
+      {
+        quality: pipeline.quality,
+        preprocessing: pipeline.preprocessing,
+        ocr: {
+          variant_name: pipeline.ocr.variant_name,
+          confidence: pipeline.ocr.confidence,
+          passes: pipeline.ocr.passes,
+        },
+        document: pipeline.document,
+        llm: pipeline.llm,
+        requires_manual_review: pipeline.confidence.requires_manual_review,
+      },
+      photoRefs,
       'pending_review',
       hasCoordinates ? lat : null,
       hasCoordinates ? lng : null,
     ];
 
     const result = await db.query(insertQuery, insertValues);
-    const reportId = result?.rows?.[0]?.report_id;
+    const reportId = result?.rows?.[0]?.id;
 
     events.emit('report.created', {
       report_id: reportId,
@@ -264,6 +317,9 @@ async function submitPhoto(req, res) {
       ocr_confidence: ocrConfidence,
       extracted,
       missing_fields: missingFields,
+      document_type: pipeline.document.type,
+      field_confidence: pipeline.confidence.fields,
+      requires_manual_review: pipeline.confidence.requires_manual_review,
     });
   } catch (error) {
     return res.status(500).json({

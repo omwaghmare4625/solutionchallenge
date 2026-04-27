@@ -1,12 +1,16 @@
 {
-  "name": "gsol",
+  "name": "solutionchallenge",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "firebase:login": "firebase login",
+    "firebase:projects:list": "firebase projects:list",
+    "firebase:deploy": "firebase deploy",
+    "firebase:hosting:channel": "firebase hosting:channel:deploy preview"
   },
   "dependencies": {
     "expo": "^55.0.17",

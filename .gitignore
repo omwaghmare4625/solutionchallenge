@@ -29,6 +29,7 @@ node_modules/
 # next.js
 /.next/
 /out/
+frontend/web/.next/
 
 # production
 /build
@@ -44,6 +45,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+backend/.env
 
 # vercel
 .vercel
@@ -51,3 +53,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# backend specifics
+backend/uploads/
+
+# tool specifics
+.agents/
+.claude/
+.junie/
+
+# secrets
+noble-network-494010-e1-firebase-adminsdk-fbsvc-5599149ca7.json

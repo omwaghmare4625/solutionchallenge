@@ -1,7 +1,17 @@
 const { EventEmitter } = require('events');
 
-const events = new EventEmitter();
+class AppEventBus extends EventEmitter {
+  constructor() {
+    super();
+    this.setMaxListeners(100);
+  }
 
-events.setMaxListeners(100);
+  emitEvent(eventName, payload = {}) {
+    return this.emit(eventName, {
+      ...payload,
+      emitted_at: new Date().toISOString()
+    });
+  }
+}
 
-module.exports = events;
+module.exports = new AppEventBus();
